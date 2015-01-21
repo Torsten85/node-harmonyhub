@@ -1,4 +1,4 @@
-var Client = require('./lib/Client');
-
-module.exports = Client;
+module.exports = {
+  Client: require('./lib/Client')
+};
 
