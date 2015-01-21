@@ -1,5 +1,5 @@
 {
-  "name": "node-harmonyhub",
+  "name": "harmonyhub",
   "version": "0.0.1",
   "description": "Harmony Hub api",
   "main": "index.js",
