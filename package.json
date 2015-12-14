@@ -9,8 +9,13 @@
   "author": "Torsten Blindert",
   "license": "MIT",
   "dependencies": {
-    "ltx": "^0.8.0",
-    "node-xmpp-client": "^1.0.0-alpha19",
-    "underscore": "^1.7.0"
+    "debug": "^2.2.0",
+    "harmonyhubjs-discover": "^1.0.2",
+    "ltx": "^2.2.0",
+    "node-xmpp-client": "git://github.com/PSeitz/node-xmpp-client",
+    "node-xmpp-core": "git://github.com/PSeitz/node-xmpp-core",
+    "node-xmpp-stanza": "^1.1.0",
+    "underscore": "*",
+    "node-expat": "*"
   }
 }
