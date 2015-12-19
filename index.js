@@ -1,4 +1,4 @@
 module.exports = {
-  Client: require('./lib/Client')
+  Client: require('./lib/client')
 };
 
