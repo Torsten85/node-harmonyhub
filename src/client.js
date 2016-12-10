@@ -8,6 +8,9 @@ import Device from './device';
 import Cache from './cache';
 import IQ from './iq';
 
+const RETRY_COUNT = 1;
+const RETRY_TIMEOUT = 2000;
+
 export default class Client extends EventEmitter {
 
   constructor({ ip, port = 5222, discoverTimeout = 5000 } = {}) {
@@ -99,6 +102,23 @@ export default class Client extends EventEmitter {
 
     this.xmpp.on('stanza', this.onStanza.bind(this));
 
+    this.xmpp.on('error', (error) => {
+      if (error.message === 'XML parse error') {
+        console.log(`Received error: ${error.message}`);
+
+        // Response queue holds all not resolved transmissions
+        for(const id of Object.keys(this.responseQueue)) {
+          this.retry(id);
+        }
+
+        if (this.retriesLeft < 0) {
+          throw error;
+        }
+      } else {
+        throw error;
+      }
+    });
+
     return new Promise((resolve) => {
       this.xmpp.once('online', () => {
         this.emit('connect');
@@ -106,6 +126,18 @@ export default class Client extends EventEmitter {
         resolve();
       });
     });
+  }
+
+  retry(id) {
+    const transmission = this.responseQueue[id];
+    transmission.attempt += 1;
+
+    if (transmission.attempt > RETRY_COUNT) {
+      throw new Error(`Retry limit of transmission ${id} reached`);
+    }
+
+    console.log(`resending transmission ${id}`);
+    this.xmpp.send(transmission.iq);
   }
 
   async connect() {
@@ -134,7 +166,7 @@ export default class Client extends EventEmitter {
 
       id = `activity_${body.activityId}`;
       if (this.responseQueue[id]) {
-        this.responseQueue[id](body);
+        this.responseQueue[id].resolve(body);
         delete this.responseQueue[id];
       }
 
@@ -152,7 +184,7 @@ export default class Client extends EventEmitter {
 
     id = stanza.attr('id');
     if (this.responseQueue[id]) {
-      this.responseQueue[id](IQ.parseStanza(stanza));
+      this.responseQueue[id].resolve(IQ.parseStanza(stanza));
       delete this.responseQueue[id];
     }
   }
@@ -166,15 +198,21 @@ export default class Client extends EventEmitter {
       iq.body(body);
     }
 
-    return new Promise((resolve) => {
-      if (command === 'startactivity') {
-        this.responseQueue['activity_' + body.activityId] = resolve;
-      }   else {
-        this.responseQueue[iq.id] = resolve;
-      }
+    const promise = new Promise((resolve) => {
+
+      const id = command === 'startactivity' ? `activity_${body.activityId}` : iq.id;
+      this.responseQueue[id] = { iq, resolve: clearTimeoutAndResolve, attempt: 0 };
+
+      const interval = setInterval(() => this.retry(id), RETRY_TIMEOUT);
+      const clearTimeoutAndResolve = () => {
+        clearInterval(interval);
+        resolve();
+      };
 
       this.xmpp.send(iq);
     });
+
+    return promise;
   }
 
   async powerOff() {
