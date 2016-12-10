@@ -1,11 +1,12 @@
 {
   "name": "harmonyhub",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "lib/client.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "nodemon --exec babel-node index.js"
+    "watch": "nodemon --exec babel-node index.js",
+    "build": "babel src --out-dir lib"
   },
   "keywords": [],
   "author": "",
