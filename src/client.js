@@ -9,7 +9,7 @@ import Cache from './cache';
 import IQ from './iq';
 
 const RETRY_COUNT = 1;
-const RETRY_TIMEOUT = 2000;
+const RETRY_TIMEOUT = 5000;
 
 export default class Client extends EventEmitter {
 
@@ -21,7 +21,6 @@ export default class Client extends EventEmitter {
     this.xmpp = null;
 
     this.responseQueue = {};
-    this.state = { connected : false };
     this.cache = new Cache();
   }
 
@@ -51,6 +50,10 @@ export default class Client extends EventEmitter {
   }
 
   getIdentity() {
+    if (this.cache.has('identity')) {
+      return this.cache.get('identity');
+    }
+
     const iq = new IQ()
       .from('guest')
       .command(IQ.PAIR)
@@ -72,11 +75,18 @@ export default class Client extends EventEmitter {
     });
 
     return new Promise((resolve, reject) => {
+
+      client.on('error', (error) => {
+        console.log('first client error', error);
+        reject(error);
+      });
+
       client.on('stanza', (stanza) => {
         if (stanza.attr('id') === iq.id) {
           const body = IQ.parseStanza(stanza);
           client.end();
           if (body.identity) {
+            this.cache.put('identity', body.identity);
             resolve(body.identity);
           } else {
             reject('Did not receive identity');
@@ -97,12 +107,15 @@ export default class Client extends EventEmitter {
 
     this.xmpp.once('disconnect', () => {
       this.emit('disconnect');
-      this.state.connected = false;
+      this.xmpp.end();
+      this.xmpp = null;
     });
 
     this.xmpp.on('stanza', this.onStanza.bind(this));
 
     this.xmpp.on('error', (error) => {
+      console.log('got error', error);
+      /*
       if (error.message === 'XML parse error') {
         console.log(`Received error: ${error.message}`);
 
@@ -117,12 +130,11 @@ export default class Client extends EventEmitter {
       } else {
         throw error;
       }
+      */
     });
 
     return new Promise((resolve) => {
       this.xmpp.once('online', () => {
-        this.emit('connect');
-        this.state.connected = true;
         resolve();
       });
     });
@@ -141,55 +153,49 @@ export default class Client extends EventEmitter {
   }
 
   async connect() {
-
-    if (this.state.connected) {
+    if (this.xmpp) {
       return;
     }
-
     await this.discover();
     const identity = await this.getIdentity();
     await this.login(identity);
   }
 
   disconnect() {
-    this.state.connected = false;
-    this.xmpp.end();
+    this.xmpp && this.xmpp.end();
   }
 
   async onStanza(stanza) {
 
-    let id;
     const event = stanza.getChild('event');
-
     if (event && event.attr('type') === 'harmony.engine?startActivityFinished') {
       const body = IQ.decodeBody(event.getText());
 
-      id = `activity_${body.activityId}`;
+      const id = `activity_${body.activityId}`;
       if (this.responseQueue[id]) {
         this.responseQueue[id].resolve(body);
         delete this.responseQueue[id];
       }
 
-      if (body.activityId === -1) {
-        this.emit('power', false);
-      } else {
-        const activities = await this.getActivities();
-        const activity = find(activities, activity => activity.id === body.activityId);
+      const activities = await this.getActivities();
+      const activity = find(activities, activity => activity.id === body.activityId);
 
-        if (activity) {
-          this.emit('activity', activity);
-        }
+      if (activity) {
+        console.log('received event for ', activity.label);
+        this.emit('activity', activity);
       }
+
+      return;
     }
 
-    id = stanza.attr('id');
+    const id = stanza.attr('id');
     if (this.responseQueue[id]) {
       this.responseQueue[id].resolve(IQ.parseStanza(stanza));
       delete this.responseQueue[id];
     }
   }
 
-  async send(command, body) {
+  async send(command, body, { resolve = false } = {}) {
     await this.connect();
 
     const iq = new IQ().command(command);
@@ -198,17 +204,13 @@ export default class Client extends EventEmitter {
       iq.body(body);
     }
 
-    const promise = new Promise((resolve) => {
-
-      const id = command === 'startactivity' ? `activity_${body.activityId}` : iq.id;
-      this.responseQueue[id] = { iq, resolve: clearTimeoutAndResolve, attempt: 0 };
-
-      const interval = setInterval(() => this.retry(id), RETRY_TIMEOUT);
-      const clearTimeoutAndResolve = () => {
-        clearInterval(interval);
-        resolve();
-      };
-
+    const promise = new Promise((resolver) => {
+      if (resolve) {
+        const id = command === 'startactivity' ? `activity_${body.activityId}` : iq.id;
+        this.responseQueue[id] = { iq, resolve: resolver, attempt: 0 };
+      } else {
+        resolver();
+      }
       this.xmpp.send(iq);
     });
 
@@ -228,7 +230,7 @@ export default class Client extends EventEmitter {
       return this.cache.get('config');
     }
 
-    const body = await this.send('config');
+    const body = await this.send('config', null, { resolve: true });
     this.cache.put('config', body);
     return body;
   }
@@ -282,7 +284,7 @@ export default class Client extends EventEmitter {
   }
 
   async getActiveActivity() {
-    const body = await this.send('getCurrentActivity');
+    const body = await this.send('getCurrentActivity', null, { resolve: true });
     const id = parseInt(body.result);
 
     if (id === -1) {

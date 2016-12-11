@@ -22,7 +22,7 @@ export default class Activity {
   }
 
   async isActive() {
-    const body = await this.client.send('getCurrentActivity');
+    const body = await this.client.send('getCurrentActivity', null, { resolve: true });
     return parseInt(body.result) === this.id;
   }
 }
